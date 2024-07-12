@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::fmt::Write as FmtWrite;
 use std::{io::Write, mem::swap, path::Path};
 
@@ -75,6 +75,16 @@ fn signature(words: &[Sp<Word>]) -> Signature {
             Word::Primitive(p) => {
                 if let Some(s) = p.signature() {
                     return s;
+                }
+            }
+            Word::Modified(m) => {
+                match m.modifier.value {
+                    Modifier::Primitive(Primitive::Gap) => {
+                        let mut s = signature(&m.operands);
+                        s.args += 1;
+                        return s;
+                    }
+                    _ => (),
                 }
             }
             _ => (),
@@ -439,11 +449,13 @@ fn main() {
     #B ← ⊃(++)⋅∘ 1 2 3 14 15 16
     #B ← ⊃(++)1 2 3 14 15 16
     #C ← ⊃+1 2 3 14 15 16
-    #H ← ÷2
-    #MinAvg ← H⊢+⇌⊃↙↘H⧻.⊏⍏.
-    #Q ← /↧∊+@A⇡26⌵
-    #W←⊃⋅∘∘
-    #U←⊃(⋅∘|∘)
+    H ← ÷2
+    MinAvg ← H/↧+⇌⊃↙↘H⧻.⊏⍏.
+    #MinAvg ← ÷2/↧+⇌⊃↙↘÷2⧻.⊏⍏.
+    Q ← /↧∊+@A⇡26⌵
+    X ← /+
+    W←⊃⋅∘∘
+    U←⊃(⋅∘|∘)
     "#;
 
     // let input = "H ← ÷2\nMinAvg ← H⊢+⇌⊃↙↘H⧻.⊏⍏.\nQ ← /↧∊+@A⇡26⌵\nW←⊃⋅∘∘\nU←⊃(⋅∘|∘)";
@@ -485,7 +497,7 @@ fn main() {
             //println!("{}", svg_path.display());
 
             std::process::Command::new("dot")
-                .arg("-Tsvg")
+                .arg("-Tsvg:cairo")
                 .arg("-o")
                 .arg(svg_path)
                 .arg(dot_path)
@@ -544,10 +556,13 @@ static FOOTER: &str = r###"</ul>
 "###;
 
 fn plot(graph: &Graph<Op, Var>) -> String {
-    let mut input_self = HashSet::new();
-    let mut output_self = HashSet::new();
+    let mut input_self = HashMap::new();
+    let mut output_self = HashMap::new();
     let mut dot = String::new();
     writeln!(dot, "digraph G {{").unwrap();
+    writeln!(dot, "graph [fontname = \"DejaVu Sans Mono\"];").unwrap();
+    writeln!(dot, "node [fontname = \"DejaVu Sans Mono\"];").unwrap();
+    writeln!(dot, "edge [fontname = \"DejaVu Sans Mono\"];").unwrap();
 
     for (i, op) in graph.node_references() {
         match op {
@@ -569,7 +584,7 @@ fn plot(graph: &Graph<Op, Var>) -> String {
                     Word::Number(n, _) => {
                         writeln!(
                             dot,
-                            "n{} [label=\"<o0> {}\" shape=record style=filled fillcolor={}];",
+                            "n{} [label=\"<o0> {}\" shape=record style=filled fillcolor={} width=0.2];",
                             i.index(),
                             n,
                             ORANGE
@@ -579,7 +594,7 @@ fn plot(graph: &Graph<Op, Var>) -> String {
                     Word::Char(c) => {
                         writeln!(
                             dot,
-                            "n{} [label=\"<o0> {}\" shape=record style=filled fillcolor={}];",
+                            "n{} [label=\"<o0> {}\" shape=record style=filled fillcolor={} width=0.2];",
                             i.index(),
                             c,
                             SEA_GREEN
@@ -589,7 +604,7 @@ fn plot(graph: &Graph<Op, Var>) -> String {
                     Word::String(s) => {
                         writeln!(
                             dot,
-                            "n{} [label=\"<o0> {}\" shape=record style=filled fillcolor={}];",
+                            "n{} [label=\"<o0> {}\" shape=record style=filled fillcolor={} width=0.2];",
                             i.index(),
                             s,
                             SEA_GREEN
@@ -615,18 +630,19 @@ fn plot(graph: &Graph<Op, Var>) -> String {
 
                         match (args, out) {
                             (1, 1) => {
-                                input_self.insert(i);
-                                output_self.insert(i);
+                                input_self.insert((i, 0), None);
+                                output_self.insert((i, 0), None);
                                 writeln!(dot, "n{} [label=\"{}\" shape=record style=filled fillcolor={} tooltip=\"{}\" width=0.2];",
                                     i.index(),
                                     name,
-                                    //outputs,
                                     GREEN,
                                     p.name()
                                 ).unwrap();
                             }
                             (2, 1) => {
-                                writeln!(dot, "n{} [label=\"<i0> • | <o0> {} | <i1> •\" shape=record style=filled fillcolor={} tooltip=\"{}\"];",
+                                input_self.insert((i, 0), Some("io0"));
+                                output_self.insert((i, 0), Some("io0"));
+                                writeln!(dot, "n{} [label=\"<io0> {} | <i1> •\" shape=record style=filled fillcolor={} tooltip=\"{}\"];",
                                     i.index(),
                                     name,
                                     BLUE,
@@ -643,6 +659,37 @@ fn plot(graph: &Graph<Op, Var>) -> String {
                                 ).unwrap();
                             }
                         }
+                    }
+                    Word::Modified(m) => {
+                        match m.modifier.value {
+                            Modifier::Primitive(p @ Primitive::Reduce) => {
+                                input_self.insert((i, 0), None);
+                                output_self.insert((i, 0), None);
+                                let x = match m.operands[0].value {
+                                    Word::Primitive(p) => p.glyph().unwrap(),
+                                    _ => todo!(),
+                                };
+
+                                writeln!(dot, concat!(
+                                    "n{} [label=<\n",
+                                    "<TABLE BORDER=\"0\" CELLBORDER=\"1\" CELLSPACING=\"0\"><TR>\n",
+                                    "<TD ALIGN=\"center\" WIDTH=\"20\" BGCOLOR={}>{}</TD>\n",
+                                    "<TD ALIGN=\"center\" WIDTH=\"20\" BGCOLOR={}>{}</TD>\n",
+                                    "</TR></TABLE>> shape=record style=filled fillcolor={}];"), i.index(), YELLOW, p.glyph().unwrap(), BLUE, x, GREEN).unwrap();
+                            }
+                            _ => {
+                                writeln!(dot, "n{} [label=\"{:?}\" shape=record];", i.index(), word)
+                                    .unwrap();
+                            }
+                        }
+                    }
+                    Word::Ref(r) => {
+                        // TODO: lookup signature and adapt visualization
+                        input_self.insert((i, 0), None);
+                        output_self.insert((i, 0), None);
+                        let color = GREEN;
+                        writeln!(dot, "n{} [label=\"{}\" shape=record style=filled fillcolor={} width=0.2];", i.index(), r.name.value, color)
+                            .unwrap();
                     }
                     _ => {
                         writeln!(dot, "n{} [label=\"{:?}\" shape=record];", i.index(), word)
@@ -668,19 +715,21 @@ fn plot(graph: &Graph<Op, Var>) -> String {
 
     for (i, _) in graph.node_references() {
         for edge in graph.edges(i) {
-            let src = if output_self.contains(&i) {
-                format!("n{}", i.index())
-            } else {
-                format!("n{}:o{}", i.index(), edge.weight().src_slot)
+            let var = edge.weight();
+
+            let src = match output_self.get(&(i, var.src_slot)) {
+                Some(Some(slot)) => format!("n{}:{}", i.index(), slot),
+                Some(None) => format!("n{}", i.index()),
+                _ => format!("n{}:o{}", i.index(), var.src_slot),
             };
 
-            let dst = if input_self.contains(&edge.target()) {
-                format!("n{}", edge.target().index())
-            } else {
-                format!("n{}:i{}", edge.target().index(), edge.weight().dst_slot)
+            let dst = match input_self.get(&(edge.target(), var.dst_slot)) {
+                Some(Some(slot)) => format!("n{}:{}", edge.target().index(), slot),
+                Some(None) => format!("n{}", edge.target().index()),
+                _ => format!("n{}:i{}", edge.target().index(), var.dst_slot),
             };
 
-            writeln!(dot, "{} -> {};", src, dst).unwrap();
+            writeln!(dot, "{} -> {} [arrowsize=0.5];", src, dst).unwrap();
         }
     }
 
