@@ -8,3 +8,6 @@ anyhow = "1.0.86"
 linked-hash-map = "0.5.6"
 petgraph = "0.6.5"
 uiua = {version = "0.11.1", default-features = false }
+
+[workspace]
+members = ["wasm"]
