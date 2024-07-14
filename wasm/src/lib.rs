@@ -1,9 +1,11 @@
-mod utils;
-
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
 pub fn uiua_to_dot(msg: String) -> JsValue {
+
+    #[cfg(feature = "console_error_panic_hook")]
+    console_error_panic_hook::set_once();
+
     let flows = uiua_flow::process(&msg);
 
     let obj = js_sys::Object::new();
