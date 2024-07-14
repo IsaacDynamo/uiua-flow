@@ -59,8 +59,18 @@ iframe {
 
 .right-column {
     display: flex;
-    justify-content: center;
-    align-items: center;
+    flex-direction: column;
+}
+
+.buttons {
+  flex: 0 0 auto;
+}
+
+.flow {
+  flex: 1 0 auto;
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
 
 svg {
@@ -79,24 +89,47 @@ svg {
 
           let update = () => {
             try {
+
+              var buttons = document.createElement("div");
+              buttons.classList.add("buttons")
+              var title = document.createElement("H2");
+              let flow = document.createElement("div");
+              flow.classList.add("flow")
+              var result = [buttons, title, flow]
+
               let uiua = document.getElementById("code").value
-              let dot = uiua_to_dot(uiua)
-              var result = viz.renderSVGElement(dot);
+              let flows = uiua_to_dot(uiua);
+              for (let [key, value] of Object.entries(flows)) {
+                  let button = document.createElement("button");
+                  button.innerText = key;
+                  let svg = viz.renderSVGElement(value);
+                  button.onclick = () => {
+                    title.innerText = key
+                    flow.replaceChildren(svg)
+                  }
+                  buttons.appendChild(button)
+
+                  if (flow.childElementCount == 0) {
+                    title.innerText = key
+                    flow.appendChild(svg);
+                  }
+              }
+
             } catch (error) {
-              var result = document.createElement("div");
-              result.classList.add("error")
-              result.innerText = "Not all operations are supported 😅\nInternal error:" + error.message;
+              var err = document.createElement("div");
+              err.classList.add("error")
+              err.innerText = "Not all operations are supported 😅\nInternal error:" + error.message;
+              var result = [err]
             }
-            return result;
+
+            document.getElementById("graph").replaceChildren(...result);
           }
 
           document.getElementById("code").addEventListener('input', e => {
-            let result = update();
-            document.getElementById("graph").replaceChildren(result);
+            update();
           });
 
-          let result = update();
-          document.getElementById("graph").appendChild(result);
+          update();
         });
       });
     </script>
@@ -104,23 +137,21 @@ svg {
       function load_example(name) {
         switch(name){
           case 'min-avg':
-            example = "# For now edit here\n# The first function gets visualized\nMinAvg ← ÷2/↧+⇌⊃↙↘÷2⧻.⊏⍏.";
+            example  = "# For now edit here\n";
+            example += "MinAvg ← ÷2/↧+⇌⊃↙↘÷2⧻.⊏⍏.\n";
             break;
           case 'stack-ops':
-            example  = "# Basic stack ops. Results in arrows only\n";
-            example += "# Currently only first function gets visualized\n";
-            example += "# Comment stuff out to see the other functions\n";
+            example  = "# Basic stack ops\n";
+            example += "# Results in arrow only data-flow\n";
             example += "Dup ← .\n";
             example += "Over ← ,\n";
             example += "Flip ← :\n";
             example += "Pop ← ◌\n";
             example += "Id ← ∘\n";
-            example += "OtherFlip ← ⊃⋅∘∘\n";
+            example += "WeirdFlip ← ⊃⋅∘∘\n";
             break;
           case 'combinators':
-            example  = "# Combinators from https://www.uiua.org/docs/combinators\n";
-            example += "# Currently only first function gets visualized\n";
-            example += "# Comment stuff out to see the other functions\n";
+            example  = "# Combinators examples from https://www.uiua.org/docs/combinators\n";
             example += "Identity ← ∘\n";
             example += "Kestrel ← ⊙◌\n";
             example += "Kite ← ⋅∘\n";
@@ -170,6 +201,8 @@ svg {
         <textarea id="code" type="text" style="width: 800;"># For now edit here
 # The first function gets visualized
 MinAvg ← ÷2/↧+⇌⊃↙↘÷2⧻.⊏⍏.</textarea>
+
+        <p>Uiua pad iframe can be used as a better editor, but code in uiua pad is not visualized!</p>
         <iframe
           id="uiuapad"
           width="800"
@@ -177,8 +210,7 @@ MinAvg ← ÷2/↧+⇌⊃↙↘÷2⧻.⊏⍏.</textarea>
           src="https://www.uiua.org/embedpad?src=0_12_0-dev_1__IyBUT0RPOiB1c2UgdGhpcyBlZGl0b3IsCiMgbm93IGl0J3MganVzdCBhIGlmcmFtZQpNaW5Bdmcg4oaQIMO3Mi_ihqcr4oeM4oqD4oaZ4oaYw7cy4qe7LuKKj-KNjy4K">
         </iframe>
       </div>
-      <div class="right-column">
-        <div id="graph"></div>
+      <div id="graph" class="right-column">
       </div>
     </div>
   </body>

@@ -668,6 +668,7 @@ dependencies = [
  "console_error_panic_hook",
  "getrandom",
  "instant",
+ "js-sys",
  "uiua-flow",
  "wasm-bindgen",
  "wasm-bindgen-test",
