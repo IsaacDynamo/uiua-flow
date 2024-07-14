@@ -32,7 +32,7 @@ struct Dataflow {
 
 impl Dataflow {
     fn pop(&mut self) -> (NodeIndex, usize) {
-        self.stack.pop().expect("stack underflow")
+        self.stack.pop().expect("more stack, underflow")
     }
 
     fn peek(&self, index: usize) -> (NodeIndex, usize) {
@@ -42,7 +42,7 @@ impl Dataflow {
             .and_then(|i| i.checked_sub(1))
             .and_then(|i| self.stack.get(i))
             .copied()
-            .expect("stack underflow")
+            .expect("more stack, underflow")
     }
 
     fn add_edge(&mut self, src: (NodeIndex, usize), dst: (NodeIndex, usize)) {
@@ -143,20 +143,20 @@ fn interpret(flow: &mut Dataflow, words: &[Sp<Word>]) {
                                         assert_eq!(
                                             branch.value.lines.len(),
                                             1,
-                                            "Expect single-line function pack"
+                                            "expect single-line function pack"
                                         );
                                         let words = &branch.value.lines[0];
                                         inner(flow, &mut stacks, &stack, words);
                                     }
                                 } else {
-                                    panic!("Expected function pack");
+                                    panic!("expected function pack");
                                 }
                             } else if m.operands.len() == 2 {
                                 for word in m.operands.chunks(1) {
                                     inner(flow, &mut stacks, &stack, word);
                                 }
                             } else {
-                                panic!("Expected function pack or two operands");
+                                panic!("expected function pack or two operands");
                             }
 
                             // Remove used args.
@@ -164,7 +164,7 @@ fn interpret(flow: &mut Dataflow, words: &[Sp<Word>]) {
                                 .iter()
                                 .map(|(s, _)| s.args)
                                 .max()
-                                .expect("Expect multiple operands");
+                                .expect("multiple operands");
                             for _ in 0..pops {
                                 stack.pop();
                             }
@@ -180,7 +180,7 @@ fn interpret(flow: &mut Dataflow, words: &[Sp<Word>]) {
                             flow.stack = stack;
                         }
                         Modifier::Primitive(Primitive::Both) => {
-                            assert_eq!(m.operands.len(), 1, "Expect a single operand");
+                            assert_eq!(m.operands.len(), 1, "expect a single operand");
 
                             // Run once
                             interpret(flow, &m.operands);
@@ -222,20 +222,20 @@ fn interpret(flow: &mut Dataflow, words: &[Sp<Word>]) {
                                         assert_eq!(
                                             branch.value.lines.len(),
                                             1,
-                                            "Expect single-line function pack"
+                                            "expect single-line function pack"
                                         );
                                         let words = &branch.value.lines[0];
                                         inner(flow, words, &mut tmp_stack);
                                     }
                                 } else {
-                                    panic!("Expected function pack");
+                                    panic!("expected function pack");
                                 }
                             } else if m.operands.len() == 2 {
                                 for word in m.operands.chunks(1) {
                                     inner(flow, word, &mut tmp_stack);
                                 }
                             } else {
-                                panic!("Expected function pack or two operands");
+                                panic!("expected function pack or two operands");
                             }
 
                             // Push results
@@ -275,7 +275,7 @@ fn interpret(flow: &mut Dataflow, words: &[Sp<Word>]) {
                             let s = signature(&m.operands);
 
                             // Duplicate last argument
-                            assert!(s.args > 1);
+                            assert!(s.args >= 1, "expect operands to take at least one argument");
                             let n = s.args - 1;
                             let mut tmp_stack = Vec::new();
                             for _ in 0..n {
@@ -288,7 +288,7 @@ fn interpret(flow: &mut Dataflow, words: &[Sp<Word>]) {
 
                             interpret(flow, &m.operands);
                         }
-                        _ => todo!(),
+                        _ => todo!("support more modifiers"),
                     }
                 }
                 Word::Primitive(p) => match *p {
@@ -311,12 +311,12 @@ fn interpret(flow: &mut Dataflow, words: &[Sp<Word>]) {
                     _ => {
                         let n = flow.g.add_node(Op::Word(word.value.clone()));
                         // Pop Args
-                        for i in 0..p.args().expect("Expected primitive signature") {
+                        for i in 0..p.args().expect("primitive signature") {
                             let src = flow.pop();
                             flow.add_edge(src, (n, i))
                         }
                         // Push outputs
-                        for i in 0..p.outputs().expect("Expected primitive signature") {
+                        for i in 0..p.outputs().expect("primitive signature") {
                             flow.stack.push((n, i));
                         }
                     }
@@ -340,7 +340,7 @@ fn interpret(flow: &mut Dataflow, words: &[Sp<Word>]) {
                         flow.stack.push((n, i));
                     }
                 }
-                _ => todo!(),
+                _ => todo!("support more word variants"),
             }
         }
     }
