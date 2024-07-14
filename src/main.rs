@@ -1,8 +1,7 @@
-
-use uiua_flow::*;
+use petgraph::dot::Dot;
 use std::fmt::Write as FmtWrite;
 use std::{io::Write, path::Path};
-use petgraph::dot::Dot;
+use uiua_flow::*;
 
 fn main() {
     let input = r#"

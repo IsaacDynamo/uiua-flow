@@ -77,16 +77,14 @@ fn signature(words: &[Sp<Word>]) -> Signature {
                     return s;
                 }
             }
-            Word::Modified(m) => {
-                match m.modifier.value {
-                    Modifier::Primitive(Primitive::Gap) => {
-                        let mut s = signature(&m.operands);
-                        s.args += 1;
-                        return s;
-                    }
-                    _ => (),
+            Word::Modified(m) => match m.modifier.value {
+                Modifier::Primitive(Primitive::Gap) => {
+                    let mut s = signature(&m.operands);
+                    s.args += 1;
+                    return s;
                 }
-            }
+                _ => (),
+            },
             _ => (),
         }
     }
@@ -424,7 +422,7 @@ fn literal_value(word: &Word) -> String {
                 match c {
                     "inf" => "∞",
                     "eta" => "η",
-                    "pi"  => "π",
+                    "pi" => "π",
                     "tau" => "τ",
                     _ => c,
                 }
@@ -435,14 +433,14 @@ fn literal_value(word: &Word) -> String {
             } else {
                 n(s).to_string()
             }
-        },
+        }
         Word::Char(c) => {
             format!("@{c}")
-        },
+        }
         Word::String(s) => {
             format!("\"{s}\"")
         }
-        _ => panic!("unexpected literal value")
+        _ => panic!("unexpected literal value"),
     }
 }
 
@@ -499,9 +497,13 @@ pub fn plot(graph: &Graph<Op, Var>) -> String {
                             ORANGE
                         };
 
-                        let s = words.iter()
+                        let s = words
+                            .iter()
                             .map(|word| literal_value(&word.value))
-                            .reduce(|mut a, b| { write!(a, "_{b}").unwrap(); a })
+                            .reduce(|mut a, b| {
+                                write!(a, "_{b}").unwrap();
+                                a
+                            })
                             .expect("non empty strand");
 
                         writeln!(
@@ -547,36 +549,51 @@ pub fn plot(graph: &Graph<Op, Var>) -> String {
                             }
                         }
                     }
-                    Word::Modified(m) => {
-                        match m.modifier.value {
-                            Modifier::Primitive(p @ Primitive::Reduce) => {
-                                input_self.insert((i, 0), None);
-                                output_self.insert((i, 0), None);
-                                let x = match m.operands[0].value {
-                                    Word::Primitive(p) => p.glyph().unwrap(),
-                                    _ => todo!("supported more word variants within reduce"),
-                                };
+                    Word::Modified(m) => match m.modifier.value {
+                        Modifier::Primitive(p @ Primitive::Reduce) => {
+                            input_self.insert((i, 0), None);
+                            output_self.insert((i, 0), None);
+                            let x = match m.operands[0].value {
+                                Word::Primitive(p) => p.glyph().unwrap(),
+                                _ => todo!("supported more word variants within reduce"),
+                            };
 
-                                writeln!(dot, concat!(
+                            writeln!(
+                                dot,
+                                concat!(
                                     "n{} [label=<\n",
                                     "<TABLE BORDER=\"0\" CELLBORDER=\"1\" CELLSPACING=\"0\"><TR>\n",
                                     "<TD ALIGN=\"center\" WIDTH=\"20\" BGCOLOR={}>{}</TD>\n",
                                     "<TD ALIGN=\"center\" WIDTH=\"20\" BGCOLOR={}>{}</TD>\n",
-                                    "</TR></TABLE>> shape=record style=filled fillcolor={}];"), i.index(), YELLOW, p.glyph().unwrap(), BLUE, x, GREEN).unwrap();
-                            }
-                            _ => {
-                                writeln!(dot, "n{} [label=\"{:?}\" shape=record];", i.index(), word)
-                                    .unwrap();
-                            }
+                                    "</TR></TABLE>> shape=record style=filled fillcolor={}];"
+                                ),
+                                i.index(),
+                                YELLOW,
+                                p.glyph().unwrap(),
+                                BLUE,
+                                x,
+                                GREEN
+                            )
+                            .unwrap();
                         }
-                    }
+                        _ => {
+                            writeln!(dot, "n{} [label=\"{:?}\" shape=record];", i.index(), word)
+                                .unwrap();
+                        }
+                    },
                     Word::Ref(r) => {
                         // TODO: lookup signature and adapt visualization
                         input_self.insert((i, 0), None);
                         output_self.insert((i, 0), None);
                         let color = GREEN;
-                        writeln!(dot, "n{} [label=\"{}\" shape=record style=filled fillcolor={} width=0.2];", i.index(), r.name.value, color)
-                            .unwrap();
+                        writeln!(
+                            dot,
+                            "n{} [label=\"{}\" shape=record style=filled fillcolor={} width=0.2];",
+                            i.index(),
+                            r.name.value,
+                            color
+                        )
+                        .unwrap();
                     }
                     _ => {
                         todo!("supported more word variants");
@@ -623,7 +640,6 @@ pub fn plot(graph: &Graph<Op, Var>) -> String {
     dot
 }
 
-
 #[cfg(test)]
 mod test {
     use crate::*;
@@ -647,5 +663,4 @@ mod test {
         plot(process("@a_@b").get("root").unwrap());
         plot(process("\"b\"_\"a\"").get("root").unwrap());
     }
-
 }
