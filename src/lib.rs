@@ -108,6 +108,10 @@ fn interpret(flow: &mut Dataflow, words: &[Sp<Word>]) {
                     let n = flow.g.add_node(Op::Word(word.value.clone()));
                     flow.stack.push((n, 0));
                 }
+                Word::Strand(_) => {
+                    let n = flow.g.add_node(Op::Word(word.value.clone()));
+                    flow.stack.push((n, 0));
+                }
                 Word::Modified(m) => {
                     match m.modifier.value {
                         Modifier::Primitive(Primitive::Fork) => {
@@ -413,6 +417,35 @@ pub fn process(input: &str) -> LinkedHashMap<String, Graph<Op, Var>> {
     flows
 }
 
+fn literal_value(word: &Word) -> String {
+    match word {
+        Word::Number(s, _) => {
+            fn n(c: &str) -> &str {
+                match c {
+                    "inf" => "∞",
+                    "eta" => "η",
+                    "pi"  => "π",
+                    "tau" => "τ",
+                    _ => c,
+                }
+            }
+
+            if let Some(rem) = s.strip_prefix(['`', '¯']) {
+                format!("¯{}", n(rem))
+            } else {
+                n(s).to_string()
+            }
+        },
+        Word::Char(c) => {
+            format!("@{c}")
+        },
+        Word::String(s) => {
+            format!("\"{s}\"")
+        }
+        _ => panic!("unexpected literal value")
+    }
+}
+
 pub fn plot(graph: &Graph<Op, Var>) -> String {
     let mut input_self = HashMap::new();
     let mut output_self = HashMap::new();
@@ -439,48 +472,50 @@ pub fn plot(graph: &Graph<Op, Var>) -> String {
             }
             Op::Word(word) => {
                 match word {
-                    Word::Number(n, _) => {
+                    Word::Number(_, _) => {
                         writeln!(
                             dot,
                             "n{} [label=\"<o0> {}\" shape=record style=filled fillcolor={} width=0.2];",
                             i.index(),
-                            n,
+                            literal_value(word).replace('"', "\\\""),
                             ORANGE
                         )
                         .unwrap();
                     }
-                    Word::Char(c) => {
+                    Word::Char(_) | Word::String(_) => {
                         writeln!(
                             dot,
                             "n{} [label=\"<o0> {}\" shape=record style=filled fillcolor={} width=0.2];",
                             i.index(),
-                            c,
+                            literal_value(word).replace('"', "\\\""),
                             SEA_GREEN
                         )
                         .unwrap();
                     }
-                    Word::String(s) => {
+                    Word::Strand(words) => {
+                        let color = if matches!(words[0].value, Word::Char(_) | Word::String(_)) {
+                            SEA_GREEN
+                        } else {
+                            ORANGE
+                        };
+
+                        let s = words.iter()
+                            .map(|word| literal_value(&word.value))
+                            .reduce(|mut a, b| { write!(a, "_{b}").unwrap(); a })
+                            .expect("non empty strand");
+
                         writeln!(
                             dot,
                             "n{} [label=\"<o0> {}\" shape=record style=filled fillcolor={} width=0.2];",
                             i.index(),
-                            s,
-                            SEA_GREEN
+                            s.replace('"', "\\\""),
+                            color
                         )
                         .unwrap();
                     }
                     Word::Primitive(p) => {
                         let args = p.args().unwrap();
                         let out = p.outputs().unwrap();
-
-                        let inputs = (0..args)
-                            .map(|a| format!("<i{a}> •"))
-                            .reduce(|a, b| format!("{a} | {b}"))
-                            .unwrap_or_default();
-                        let outputs = (0..out)
-                            .map(|a| format!("<o{a}> •"))
-                            .reduce(|a, b| format!("{a} | {b}"))
-                            .unwrap_or_default();
                         let name = p
                             .glyph()
                             .map(|c| c.to_string())
@@ -508,13 +543,7 @@ pub fn plot(graph: &Graph<Op, Var>) -> String {
                                 ).unwrap();
                             }
                             _ => {
-                                writeln!(dot, "n{} [label=\"{{{{{}}} | {} | {{{}}}}}\" shape=record style=filled fillcolor={}];",
-                                    i.index(),
-                                    inputs,
-                                    name,
-                                    outputs,
-                                    YELLOW // todo
-                                ).unwrap();
+                                todo!("support more primitives")
                             }
                         }
                     }
@@ -525,7 +554,7 @@ pub fn plot(graph: &Graph<Op, Var>) -> String {
                                 output_self.insert((i, 0), None);
                                 let x = match m.operands[0].value {
                                     Word::Primitive(p) => p.glyph().unwrap(),
-                                    _ => todo!(),
+                                    _ => todo!("supported more word variants within reduce"),
                                 };
 
                                 writeln!(dot, concat!(
@@ -550,8 +579,7 @@ pub fn plot(graph: &Graph<Op, Var>) -> String {
                             .unwrap();
                     }
                     _ => {
-                        writeln!(dot, "n{} [label=\"{:?}\" shape=record];", i.index(), word)
-                            .unwrap();
+                        todo!("supported more word variants");
                     }
                 }
             }
@@ -593,4 +621,31 @@ pub fn plot(graph: &Graph<Op, Var>) -> String {
 
     writeln!(dot, "}}").unwrap();
     dot
+}
+
+
+#[cfg(test)]
+mod test {
+    use crate::*;
+
+    #[test]
+    fn numbers() {
+        plot(process("0 1.1").get("root").unwrap());
+        plot(process("eta pi tau inf").get("root").unwrap());
+        plot(process("η π τ ∞ ").get("root").unwrap());
+        plot(process("`1 `1.1 `pi `π").get("root").unwrap());
+        plot(process("¯1 ¯1.1 ¯pi ¯π").get("root").unwrap());
+    }
+
+    #[test]
+    fn strand() {
+        plot(process("0_1.1").get("root").unwrap());
+        plot(process("eta_pi_tau_inf").get("root").unwrap());
+        plot(process("η_π_τ_∞").get("root").unwrap());
+        plot(process("`1_`1.1_`pi_`π").get("root").unwrap());
+        plot(process("¯1_¯1.1_¯pi_¯π").get("root").unwrap());
+        plot(process("@a_@b").get("root").unwrap());
+        plot(process("\"b\"_\"a\"").get("root").unwrap());
+    }
+
 }
