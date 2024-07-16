@@ -62,6 +62,7 @@ static SEA_GREEN: &str = "\"#11cc99\"";
 static GREEN: &str = "\"#95d16a\"";
 static YELLOW: &str = "\"#f0c36f\"";
 static BLUE: &str = "\"#54b0fc\"";
+static PURPLE: &str = "\"#cc6be9\"";
 
 fn signature(words: &[Sp<Word>]) -> Signature {
     if words.len() == 1 {
@@ -285,6 +286,13 @@ fn interpret(flow: &mut Dataflow, words: &[Sp<Word>]) {
                             }
 
                             interpret(flow, &m.operands);
+                        }
+                        Modifier::Primitive(Primitive::Under) => {
+                            let n = flow.g.add_node(Op::Word(word.value.clone()));
+                            let src = flow.pop();
+                            let dst = (n, 0);
+                            flow.stack.push(dst);
+                            flow.add_edge(src, dst);
                         }
                         _ => todo!("support more modifiers"),
                     }
@@ -576,6 +584,39 @@ pub fn plot(graph: &Graph<Op, Var>) -> String {
                             )
                             .unwrap();
                         }
+                        Modifier::Primitive(p @ Primitive::Under) => {
+                            input_self.insert((i, 0), None);
+                            output_self.insert((i, 0), None);
+                            let x = match m.operands[0].value {
+                                Word::Primitive(p) => p.glyph().unwrap(),
+                                _ => todo!("supported more word variants within under"),
+                            };
+                            let y = match m.operands[1].value {
+                                Word::Primitive(p) => p.glyph().unwrap(),
+                                _ => todo!("supported more word variants within under"),
+                            };
+
+                            writeln!(
+                                dot,
+                                concat!(
+                                    "n{} [label=<\n",
+                                    "<TABLE BORDER=\"0\" CELLBORDER=\"1\" CELLSPACING=\"0\"><TR>\n",
+                                    "<TD ALIGN=\"center\" WIDTH=\"20\" BGCOLOR={}>{}</TD>\n",
+                                    "<TD ALIGN=\"center\" WIDTH=\"20\" BGCOLOR={}>{}</TD>\n",
+                                    "<TD ALIGN=\"center\" WIDTH=\"20\" BGCOLOR={}>{}</TD>\n",
+                                    "</TR></TABLE>> shape=record style=filled fillcolor={}];"
+                                ),
+                                i.index(),
+                                PURPLE,
+                                p.glyph().unwrap(),
+                                GREEN,
+                                x,
+                                GREEN,
+                                y,
+                                GREEN
+                            )
+                            .unwrap();
+                        }
                         _ => {
                             writeln!(dot, "n{} [label=\"{:?}\" shape=record];", i.index(), word)
                                 .unwrap();
@@ -662,5 +703,18 @@ mod test {
         plot(process("¯1_¯1.1_¯pi_¯π").get("root").unwrap());
         plot(process("@a_@b").get("root").unwrap());
         plot(process("\"b\"_\"a\"").get("root").unwrap());
+    }
+
+    #[test]
+    fn under() {
+        plot(process("X=⍜⊢⇌").get("X").unwrap());
+        plot(process("X=⍜×⁅").get("X").unwrap());
+    }
+
+    #[test]
+    fn reduce() {
+        plot(process("X=/+").get("X").unwrap());
+        plot(process("X=/⋅∘").get("X").unwrap());
+        plot(process("X=/(⊂⊂)").get("X").unwrap());
     }
 }
