@@ -131,6 +131,22 @@ fn signature(uiua: &Uiua, words: &[Sp<Word>]) -> Signature {
     }
 }
 
+fn is_dyadic_primitive(word: &Word) -> bool {
+    if let Word::Primitive(p) = word {
+        p.signature() == Some(Signature { args: 2, outputs: 1 })
+    } else {
+        false
+    }
+}
+
+fn is_monadic_primitive(word: &Word) -> bool {
+    if let Word::Primitive(p) = word {
+        p.signature() == Some(Signature { args: 1, outputs: 1 })
+    } else {
+        false
+    }
+}
+
 fn interpret(uiua: &Uiua, flow: &mut Dataflow, words: &[Sp<Word>]) {
     for word in words.iter().rev() {
         if word.value.is_code() {
@@ -278,7 +294,7 @@ fn interpret(uiua: &Uiua, flow: &mut Dataflow, words: &[Sp<Word>]) {
                             }
                         }
                         Modifier::Primitive(Primitive::Reduce) => {
-                            if matches!(m.operands[0].value, Word::Primitive(_)) {
+                            if is_dyadic_primitive(&m.operands[0].value) {
                                 // Special case for single glyph reduces, this will result in an other visualization
                                 let n = flow.g.add_node(Op::Word(word.value.clone()));
                                 let src = flow.pop();
@@ -340,11 +356,34 @@ fn interpret(uiua: &Uiua, flow: &mut Dataflow, words: &[Sp<Word>]) {
                             interpret(uiua, flow, &m.operands);
                         }
                         Modifier::Primitive(Primitive::Under) => {
-                            let n = flow.g.add_node(Op::Word(word.value.clone()));
-                            let src = flow.pop();
-                            let dst = (n, 0);
-                            flow.stack.push(dst);
-                            flow.add_edge(src, dst);
+                            if is_monadic_primitive(&m.operands[0].value) && is_monadic_primitive(&m.operands[1].value) {
+                                // Special case dual primitive under
+                                let n = flow.g.add_node(Op::Word(word.value.clone()));
+                                let src = flow.pop();
+                                let dst = (n, 0);
+                                flow.stack.push(dst);
+                                flow.add_edge(src, dst);
+                            } else {
+                                let begin = flow.g.add_node(Op::Begin(word.value.clone()));
+                                let end = flow.g.add_node(Op::End(word.value.clone()));
+
+                                let s = signature(uiua, &m.operands[0..=0]);
+                                let additional_args = flow.take(s.args - 1);
+                                let src: (NodeIndex, usize) = flow.pop();
+                                flow.add_edge(src, (begin, 0));
+                                flow.stack.push((begin, 0));
+                                flow.restore(additional_args);
+                                interpret(uiua, flow, &m.operands[0..=0]);
+                                let intermediate: (NodeIndex, usize) = flow.pop();
+                                flow.add_edge(intermediate, (end, 0));
+
+                                flow.stack.push((begin, 1));
+                                interpret(uiua, flow, &m.operands[1..=1]);
+                                let result: (NodeIndex, usize) = flow.pop();
+                                flow.add_edge(result, (end, 1));
+
+                                flow.stack.push((end, 0));
+                            }
                         }
                         _ => todo!("support more modifiers"),
                     }
@@ -713,6 +752,16 @@ pub fn plot(graph: &Graph<Op, Var>) -> String {
                                     YELLOW
                                 ).unwrap()
                             }
+                            Modifier::Primitive(p @ Primitive::Under) => {
+                                input_self.insert((i, 0), None);
+                                writeln!(
+                                    dot,
+                                    "n{} [label=\"{{{} | {{ <o0> • | <o1> •}}}}\" shape=record style=filled fillcolor={} width=0.2];",
+                                    i.index(),
+                                    p.glyph().unwrap(),
+                                    PURPLE
+                                ).unwrap()
+                            }
                             Modifier::Primitive(_) => panic!("unexpected primitive as modifier begin"),
                             Modifier::Ref(_) => todo!("support ref modifiers"),
                         }
@@ -733,6 +782,16 @@ pub fn plot(graph: &Graph<Op, Var>) -> String {
                                     i.index(),
                                     p.glyph().unwrap(),
                                     YELLOW
+                                ).unwrap()
+                            }
+                            Modifier::Primitive(p @ Primitive::Under) => {
+                                output_self.insert((i, 0), None);
+                                writeln!(
+                                    dot,
+                                    "n{} [label=\"{{{{ <i0> • | <i1> •}} | {} }}\" shape=record style=filled fillcolor={} width=0.2];",
+                                    i.index(),
+                                    p.glyph().unwrap(),
+                                    PURPLE
                                 ).unwrap()
                             }
                             Modifier::Primitive(_) => panic!("unexpected primitive as modifier begin"),
@@ -810,6 +869,8 @@ mod test {
     fn under() {
         plot(process("X=⍜⊢⇌").get("X").unwrap());
         plot(process("X=⍜×⁅").get("X").unwrap());
+        plot(process("X=⍜(×1e3)⁅").get("X").unwrap());
+        plot(process("X=⍜⊚⊂").get("X").unwrap());
     }
 
     #[test]
