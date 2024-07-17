@@ -429,14 +429,14 @@ pub fn process(input: &str) -> LinkedHashMap<String, Graph<Op, Var>> {
             }
             uiua::ast::Item::Binding(binding) => {
                 let name = &binding.name.value;
-                let f = funcs.get(name).unwrap();
-                let s = f.signature();
-
+                let s = funcs.get(name).map(|f| f.signature()).unwrap_or(Signature{ args: 0, outputs: 1 });
                 let mut flow = Dataflow::default();
 
-                let n = flow.g.add_node(Op::Input(f.signature().args));
-                for i in (0..s.args).rev() {
-                    flow.stack.push((n, i));
+                if s.args > 0 {
+                    let n = flow.g.add_node(Op::Input(s.args));
+                    for i in (0..s.args).rev() {
+                        flow.stack.push((n, i));
+                    }
                 }
 
                 interpret(&uiua, &mut flow, &binding.words);
