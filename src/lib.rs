@@ -5,8 +5,9 @@ use std::mem::swap;
 use linked_hash_map::LinkedHashMap;
 use petgraph::visit::{EdgeRef, IntoNodeReferences};
 use petgraph::{graph::Graph, graph::NodeIndex};
+use uiua::ast::Func;
+use uiua::Uiua;
 use uiua::{
-    self,
     ast::{Modifier, Word},
     Primitive, Signature, Sp,
 };
@@ -15,6 +16,8 @@ use uiua::{
 pub enum Op {
     Input(usize),
     Word(Word),
+    Begin(Word),
+    End(Word),
     Output(usize),
 }
 
@@ -33,6 +36,20 @@ struct Dataflow {
 impl Dataflow {
     fn pop(&mut self) -> (NodeIndex, usize) {
         self.stack.pop().expect("more stack, underflow")
+    }
+
+    fn take(&mut self, n: usize) -> Vec<(NodeIndex, usize)> {
+        let mut x = Vec::new();
+        for _ in 0..n {
+            x.push(self.pop())
+        }
+        x
+    }
+
+    fn restore(&mut self, values: Vec<(NodeIndex, usize)>) {
+        for v in values {
+            self.stack.push(v);
+        }
     }
 
     fn peek(&self, index: usize) -> (NodeIndex, usize) {
@@ -64,41 +81,57 @@ static YELLOW: &str = "\"#f0c36f\"";
 static BLUE: &str = "\"#54b0fc\"";
 static PURPLE: &str = "\"#cc6be9\"";
 
-fn signature(words: &[Sp<Word>]) -> Signature {
-    if words.len() == 1 {
-        match &words[0].value {
-            Word::Char(_) | Word::String(_) | Word::Number(_, _) => {
-                return Signature {
-                    args: 0,
-                    outputs: 1,
-                }
-            }
-            Word::Primitive(p) => {
-                if let Some(s) = p.signature() {
-                    return s;
-                }
-            }
-            Word::Modified(m) => match m.modifier.value {
-                Modifier::Primitive(Primitive::Gap) => {
-                    let mut s = signature(&m.operands);
-                    s.args += 1;
-                    return s;
-                }
-                _ => (),
-            },
-            _ => (),
+
+fn func_line(func: &Func) -> &[Sp<Word>] {
+    assert!(func.lines.len()==1, "only single line functions are supported");
+    &func.lines[0]
+}
+
+fn signature(uiua: &Uiua, words: &[Sp<Word>]) -> Signature {
+
+    if words.is_empty() {
+        return Signature {
+            args: 0,
+            outputs: 0,
         }
     }
 
-    println!("Warning: Guessing signature for {:?}", words);
+    let s = match &words[0].value {
+        Word::Char(_) | Word::String(_) | Word::Number(_, _) | Word::Strand(_)=> {
+            Signature {
+                args: 0,
+                outputs: 1,
+            }
+        }
+        Word::Primitive(p) => {
+            p.signature().expect("expected signature for primitive")
+        }
+        Word::Modified(m) => match m.modifier.value {
+            Modifier::Primitive(Primitive::Gap) => {
+                let mut s = signature(uiua, &m.operands);
+                s.args += 1;
+                s
+            }
+            _ => panic!("unsupported modifier"),
+        },
+        Word::Func(func) => {
+            signature(uiua, func_line(func))
+        }
+        _ => panic!("unsupported word variant"),
+    };
+
+    let m = signature(uiua, &words[1..]);
+
+    let extra_args = usize::saturating_sub(s.args, m.outputs);
+    let extra_outputs = usize::saturating_sub(m.outputs, s.args);
 
     Signature {
-        args: 1,
-        outputs: 1,
+        args: m.args + extra_args,
+        outputs: s.outputs + extra_outputs,
     }
 }
 
-fn interpret(flow: &mut Dataflow, words: &[Sp<Word>]) {
+fn interpret(uiua: &Uiua, flow: &mut Dataflow, words: &[Sp<Word>]) {
     for word in words.iter().rev() {
         if word.value.is_code() {
             println!("- {:?}", word.value);
@@ -120,18 +153,19 @@ fn interpret(flow: &mut Dataflow, words: &[Sp<Word>]) {
                             let mut stacks = Vec::new();
 
                             fn inner(
+                                uiua: &Uiua,
                                 flow: &mut Dataflow,
                                 stacks: &mut Vec<(Signature, Vec<(NodeIndex, usize)>)>,
                                 stack: &Vec<(NodeIndex, usize)>,
                                 words: &[Sp<Word>],
                             ) {
                                 flow.stack.clone_from(stack);
-                                interpret(flow, words);
+                                interpret(uiua, flow, words);
 
                                 let mut x = Vec::new();
                                 swap(&mut flow.stack, &mut x);
 
-                                let s = signature(words);
+                                let s = signature(uiua, words);
                                 stacks.push((s, x));
                             }
 
@@ -145,14 +179,14 @@ fn interpret(flow: &mut Dataflow, words: &[Sp<Word>]) {
                                             "expect single-line function pack"
                                         );
                                         let words = &branch.value.lines[0];
-                                        inner(flow, &mut stacks, &stack, words);
+                                        inner(uiua, flow, &mut stacks, &stack, words);
                                     }
                                 } else {
                                     panic!("expected function pack");
                                 }
                             } else if m.operands.len() == 2 {
                                 for word in m.operands.chunks(1) {
-                                    inner(flow, &mut stacks, &stack, word);
+                                    inner(uiua, flow, &mut stacks, &stack, word);
                                 }
                             } else {
                                 panic!("expected function pack or two operands");
@@ -182,17 +216,17 @@ fn interpret(flow: &mut Dataflow, words: &[Sp<Word>]) {
                             assert_eq!(m.operands.len(), 1, "expect a single operand");
 
                             // Run once
-                            interpret(flow, &m.operands);
+                            interpret(uiua, flow, &m.operands);
 
                             // Pop result to tmp
-                            let s = signature(&m.operands);
+                            let s = signature(uiua, &m.operands);
                             let mut tmp_stack = Vec::new();
                             for _ in 0..s.outputs {
                                 tmp_stack.push(flow.pop())
                             }
 
                             // Run second time
-                            interpret(flow, &m.operands);
+                            interpret(uiua, flow, &m.operands);
 
                             // Push first results from tmp
                             for v in tmp_stack.into_iter().rev() {
@@ -201,12 +235,13 @@ fn interpret(flow: &mut Dataflow, words: &[Sp<Word>]) {
                         }
                         Modifier::Primitive(Primitive::Bracket) => {
                             fn inner(
+                                uiua: &Uiua,
                                 flow: &mut Dataflow,
                                 words: &[Sp<Word>],
                                 tmp_stack: &mut Vec<(NodeIndex, usize)>,
                             ) {
-                                interpret(flow, words);
-                                let s = signature(words);
+                                interpret(uiua, flow, words);
+                                let s = signature(uiua, words);
                                 for _ in 0..s.outputs {
                                     tmp_stack.push(flow.pop())
                                 }
@@ -216,7 +251,7 @@ fn interpret(flow: &mut Dataflow, words: &[Sp<Word>]) {
 
                             // Process function pack or double operands.
                             if m.operands.len() == 1 {
-                                if let uiua::ast::Word::Pack(p) = &m.operands[0].value {
+                                if let Word::Pack(p) = &m.operands[0].value {
                                     for branch in &p.branches {
                                         assert_eq!(
                                             branch.value.lines.len(),
@@ -224,14 +259,14 @@ fn interpret(flow: &mut Dataflow, words: &[Sp<Word>]) {
                                             "expect single-line function pack"
                                         );
                                         let words = &branch.value.lines[0];
-                                        inner(flow, words, &mut tmp_stack);
+                                        inner(uiua, flow, words, &mut tmp_stack);
                                     }
                                 } else {
                                     panic!("expected function pack");
                                 }
                             } else if m.operands.len() == 2 {
                                 for word in m.operands.chunks(1) {
-                                    inner(flow, word, &mut tmp_stack);
+                                    inner(uiua, flow, word, &mut tmp_stack);
                                 }
                             } else {
                                 panic!("expected function pack or two operands");
@@ -243,35 +278,52 @@ fn interpret(flow: &mut Dataflow, words: &[Sp<Word>]) {
                             }
                         }
                         Modifier::Primitive(Primitive::Reduce) => {
-                            let n = flow.g.add_node(Op::Word(word.value.clone()));
-                            let s = Signature {
-                                args: 1,
-                                outputs: 1,
-                            }; // Assume this is true
-                            for i in 0..s.args {
+                            if matches!(m.operands[0].value, Word::Primitive(_)) {
+                                // Special case for single glyph reduces, this will result in an other visualization
+                                let n = flow.g.add_node(Op::Word(word.value.clone()));
                                 let src = flow.pop();
-                                flow.add_edge(src, (n, i))
-                            }
-                            for i in 0..s.outputs {
-                                flow.stack.push((n, i));
+                                let dst = (n, 0);
+                                flow.stack.push(dst);
+                                flow.add_edge(src, dst);
+                            } else {
+                                // General case with begin and end node
+                                let s = signature(uiua, &m.operands);
+                                assert!(s.args >= 2);
+
+                                let additional_args = flow.take(s.args - 2);
+                                let src: (NodeIndex, usize) = flow.pop();
+                                let begin = flow.g.add_node(Op::Begin(word.value.clone()));
+                                flow.add_edge(src, (begin, 0));
+                                flow.stack.push((begin, 1));
+                                // Additional args are stored in between the left and right arguments of the reduction function
+                                // https://uiua.org/pad?src=0_12_0-dev_1__LyjiioLiioI_KSAwIDFfMl8zCg==
+                                flow.restore(additional_args);
+                                flow.stack.push((begin, 0));
+
+                                interpret(uiua, flow, &m.operands);
+
+                                let end = flow.g.add_node(Op::End(word.value.clone()));
+                                let src = flow.pop();
+                                flow.add_edge(src, (end, 0));
+                                flow.stack.push((end, 0));
                             }
                         }
                         Modifier::Primitive(Primitive::Gap) => {
                             flow.pop();
-                            interpret(flow, &m.operands);
+                            interpret(uiua, flow, &m.operands);
                         }
                         Modifier::Primitive(Primitive::Dip) => {
                             let v = flow.pop();
-                            interpret(flow, &m.operands);
+                            interpret(uiua, flow, &m.operands);
                             flow.stack.push(v);
                         }
                         Modifier::Primitive(Primitive::On) => {
                             let v = flow.peek(0);
-                            interpret(flow, &m.operands);
+                            interpret(uiua, flow, &m.operands);
                             flow.stack.push(v);
                         }
                         Modifier::Primitive(Primitive::By) => {
-                            let s = signature(&m.operands);
+                            let s = signature(uiua, &m.operands);
 
                             // Duplicate last argument
                             assert!(s.args >= 1, "expect operands to take at least one argument");
@@ -285,7 +337,7 @@ fn interpret(flow: &mut Dataflow, words: &[Sp<Word>]) {
                                 flow.stack.push(v);
                             }
 
-                            interpret(flow, &m.operands);
+                            interpret(uiua, flow, &m.operands);
                         }
                         Modifier::Primitive(Primitive::Under) => {
                             let n = flow.g.add_node(Op::Word(word.value.clone()));
@@ -346,7 +398,13 @@ fn interpret(flow: &mut Dataflow, words: &[Sp<Word>]) {
                         flow.stack.push((n, i));
                     }
                 }
-                _ => todo!("support more word variants"),
+                Word::Func(func) => {
+                    interpret(uiua, flow, func_line(func));
+                }
+                _ => {
+                    println!("missing {:?}", word.value);
+                    todo!("support more word variants")
+                }
             }
         }
     }
@@ -366,7 +424,7 @@ pub fn process(input: &str) -> LinkedHashMap<String, Graph<Op, Var>> {
         match item {
             uiua::ast::Item::Words(words) => {
                 for line in words {
-                    interpret(&mut root, line);
+                    interpret(&uiua, &mut root, line);
                 }
             }
             uiua::ast::Item::Binding(binding) => {
@@ -381,7 +439,7 @@ pub fn process(input: &str) -> LinkedHashMap<String, Graph<Op, Var>> {
                     flow.stack.push((n, i));
                 }
 
-                interpret(&mut flow, &binding.words);
+                interpret(&uiua, &mut flow, &binding.words);
                 assert_eq!(flow.stack.len(), s.outputs, "inconsistent stack");
 
                 let n = flow.g.add_node(Op::Output(flow.stack.len()));
@@ -639,6 +697,49 @@ pub fn plot(graph: &Graph<Op, Var>) -> String {
                     _ => {
                         todo!("supported more word variants");
                     }
+                }
+            }
+            Op::Begin(word) => {
+                match word {
+                    Word::Modified(m) => {
+                        match m.modifier.value {
+                            Modifier::Primitive(p @ Primitive::Reduce) => {
+                                input_self.insert((i, 0), None);
+                                writeln!(
+                                    dot,
+                                    "n{} [label=\"{{{} | {{ <o0> • | <o1> •}}}}\" shape=record style=filled fillcolor={} width=0.2];",
+                                    i.index(),
+                                    p.glyph().unwrap(),
+                                    YELLOW
+                                ).unwrap()
+                            }
+                            Modifier::Primitive(_) => panic!("unexpected primitive as modifier begin"),
+                            Modifier::Ref(_) => todo!("support ref modifiers"),
+                        }
+                    }
+                    _ => panic!("expected modifier")
+                }
+            }
+            Op::End(word) => {
+                match word {
+                    Word::Modified(m) => {
+                        match m.modifier.value {
+                            Modifier::Primitive(p @ Primitive::Reduce) => {
+                                input_self.insert((i, 0), None);
+                                output_self.insert((i, 0), None);
+                                writeln!(
+                                    dot,
+                                    "n{} [label=\"{}\" shape=record style=filled fillcolor={} width=0.2];",
+                                    i.index(),
+                                    p.glyph().unwrap(),
+                                    YELLOW
+                                ).unwrap()
+                            }
+                            Modifier::Primitive(_) => panic!("unexpected primitive as modifier begin"),
+                            Modifier::Ref(_) => todo!("support ref modifiers"),
+                        }
+                    }
+                    _ => panic!("expected modifier")
                 }
             }
             Op::Output(n) => {
